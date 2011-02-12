@@ -1,0 +1,86 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[croatian]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{url}
+\usepackage{lmodern}
+
+\title{Zahtjevi IEEE Simulator Design natjecanja}
+
+\begin{document}
+\maketitle
+\section{Zahtjevi od strane IEEE-a}
+Potpuni opis natjecanja naveden je na stranici:
+\begin{itemize}
+  \item \url{http://www.computer.org/portal/web/competition}
+\end{itemize}
+uz dosta koristan FAQ:
+\begin{itemize}
+  \item \url{http://www.computer.org/portal/web/competition/faqs} (obavezno pročitati!).
+\end{itemize}
+Zahtjevi su dosta labavi i mogu se sažeti u
+``\emph{Napravite simulator mikroprocesora za pomoć u nastavi iz Arhitekture računala.}''
+Zahtjevi po navodima:
+\begin{itemize}
+  \item izraditi simulator,
+  \item ISA može biti uzet ili razvijen od nule,
+  \item mora se moći simulirati i CISC i RISC arhitektura (kod CISC-a dužina riječi može biti fiksna -- 32b),
+  \item moramo napisati par test primjera (C kod $\rightarrow$ naš asembler),
+  \item moramo provesti beta testiranje (za ovo moramo zamoliti druge kolege).
+\end{itemize}
+Svaki slučaj biranja (npr.\ odabir skupa instrukcija, odabir veličine instrukcija
+i sl.) moramo opravdati u dokumentaciji.
+
+\subsection{Komponente bodovanja}
+Boduju se tri komponente:
+\begin{itemize}
+  \item kvaliteta programskog rješenja,
+  \item ISA (skup instrukcija),
+  \item mogućnosti (opseg) simulatora.
+\end{itemize}
+Težine komponenti slijede gornji raspored. Njihova ideja je da 
+poštujemo pravila dobrog programskog inženjerstva, možda da izradimo inovativan
+skup instrukcija ili novi asemblerski zapis (dan je primjer, umjesto
+``{\tt ADD R0, R1, R2}'' iskoristiti zapis ``{\tt R0 ? R1 + R2}''), te da napravimo
+simulator koji će biti primjenjiv kao pomoć pri nastavi iz predmeta Arhitektura
+računala. U prvu komponentu, osim same izvedbe ubrajaju se dokumentacija i
+izvedba evaluacije.
+
+\subsection{Izvještaj}
+Izvještaj, odnosno ``\emph{Final report}'' se sastoji od sljedećih cjelina:
+\begin{enumerate}
+ \item Introduction,
+ \item Design of the architecture and its fitness for purpose,
+ \item Design of the Simulator,
+ \item Use of software engineering in creating the product,
+ \item Testing the product,
+ \item Your response to the testing and suggestions for future improvement,
+ \item Appendices.
+\end{enumerate}
+{\sc Naputak:} ``The final report may consist of no more than 50 pages ($\frac{3}{2}$ line spacing).''
+
+\section{Naši zahtjevi, želje i ideje}
+\begin{itemize}
+  \item mora moći simulirati,
+  \item prikaz rezultata (snapshot):
+  \begin{itemize}
+    \item stanje registara,
+    \item stanje memorije,
+    \item stanje pipelinea,
+    \item stanje vanjskih jedinica.
+  \end{itemize}
+  \item mogućnost spajanja vanjskih jedinica,
+  \item mogućnost konfiguriranja vanjskih jedinica,
+  \item mogućnost debugiranja,
+  \item \emph{forward} i \emph{backward} debugiranje,
+  \item lijep GUI :) -- SWT; editor, prikaz stanja, itd.
+  \item GUI za vanjske jedinice,
+  \item mogućnost konfiguriranja okoline (stanje status registra, memorije, registara, itd.),
+  \item podešavanje kašnjenja simulacije (usporavanje izvođenja simulacije),
+  \item odabir točki praćenja kod debugiranja -- trace points,
+  \item {\sc Ideja:} C $\rightarrow$ LLVM intermediate $\rightarrow$ naš asembler!
+  Ukratko, napraviti prevoditelj iz LLVM koda u naš asembler (FRISC ili nešto slično),
+  tako da se praktički C kod može simulirati :).
+\end{itemize}
+
+\end{document}
