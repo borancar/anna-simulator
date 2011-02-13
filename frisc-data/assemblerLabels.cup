@@ -1,0 +1,377 @@
+package hr.fer.anna.frisc.assembler;
+
+import java.util.Queue;
+import java.util.LinkedList;
+import hr.fer.anna.GUI.Postman;
+import java_cup.runtime.Symbol;
+
+parser code {:
+	public boolean error = false;
+	
+	public void report_error(String message, Object info) {
+		error = true;
+		StringBuffer m = new StringBuffer(); //"Sintaksna pogreska");
+		SymLookup symLookup = new SymLookup();
+		
+		if (info instanceof java_cup.runtime.Symbol) {
+			java_cup.runtime.Symbol s = ((java_cup.runtime.Symbol) info);
+			m.append( "Sintaksna greska: " + symLookup.lookup(s.sym));
+			if (s.left >= 0) {                
+				m.append(" u retku "+(s.left+1));   
+				if (s.right >= 0) {                    
+					m.append(" i stupcu "+(s.right+1));
+				}
+			}
+		}
+		
+		System.err.println(m.toString());
+	}
+    
+	public boolean isError() {
+		return error;
+	}
+:}
+
+init with {:
+	LabelsMap.get().init();
+:}
+
+action code {:
+	private Queue<String> cmdLblQueue = new LinkedList<String>();
+	private final int B = 2;
+	private final int O = 8;
+	private final int D = 10;
+	private final int H = 16;
+	
+	private int currentBase = H;
+	
+	private class NumBase {
+		public String num;
+		public int base;
+		
+		public NumBase(String num, int base) {
+			this.num = num;
+			this.base = base;
+		}
+	}
+	
+	private int intPow(int base, int exp) {
+		int res = 1;
+		
+		for (int i = 1; i <= exp; i++) {
+			res *= base;
+		}
+		
+		return res;
+	}
+	
+	private int convertFromBase(String num, int base) {
+		int rez = 0;
+		char[] digits = num.toLowerCase().toCharArray();
+		
+		for (int i = 0; i < digits.length; i++) {
+			if (Character.isDigit(digits[i])) {
+				rez += (digits[i] - '0')*intPow(base, i);
+			} else if (Character.isLetter(digits[i])) {
+				rez += (digits[i] - 'a' + 10)*intPow(base, i);
+			} else {
+				// error! Iako se ne bi smjelo dogoditi zbog lexa...
+			}
+		}
+		
+		return rez;
+	}
+	
+	private Integer convertNum(String num, int orgBase, int destBase) {
+		if (orgBase > destBase) {
+			// error!
+		}
+		
+		return Integer.valueOf(convertFromBase(num, destBase));
+	}
+	
+	private void addLabel(String lbl) {
+		if (this.cmdLblQueue.contains(lbl.toLowerCase())) {
+			Postman.get().sendErrorMsg("Labela " + lbl + " je višestruko definirana!");
+			
+		} else {
+			this.cmdLblQueue.offer(lbl.toLowerCase());
+			
+		}
+	}
+	
+	private void addCommand() {
+		this.cmdLblQueue.offer("$NAREDBA$");
+	}
+	
+	private boolean containsLabel(String lbl) {
+		return this.cmdLblQueue.contains(lbl.toLowerCase());
+	}
+	
+	private void mapirajLabele() {
+		int cmdNum = 0;
+		while (!cmdLblQueue.isEmpty()) {
+			String element = cmdLblQueue.poll();
+			if (element.equals("$NAREDBA$")) {
+				cmdNum+=4;
+			} else {
+				LabelsMap.get().mapLabel(element, Integer.valueOf(cmdNum));
+			}
+		}
+	}
+:}
+
+terminal Symbol ZAREZ, L_ZAGRADA, D_ZAGRADA, PLUS, PSEUDO_POSTO;
+terminal Symbol REGISTAR, SR_REGISTAR;
+terminal Symbol ADD, ADC, SUB, SBC, CMP, AND, OR, XOR, SHL, SHR, ASHR, ROTL, ROTR, MOVE, LOAD, LOADB, LOADH, STORE, STOREB, STOREH, PUSH, POP, JP, JR, CALL, RET, RETI, RETN, HALT; 
+terminal Symbol AP_BASE, AP_ORG, AP_END, AP_EQU, AP_DS, AP_DW, DW, DB, DH, PSEUDO_B, PSEUDO_D, PSEUDO_H, PSEUDO_O;
+terminal Symbol UVJ_C, UVJ_NC, UVJ_V, UVJ_NV, UVJ_N, UVJ_NN, UVJ_M, UVJ_P, UVJ_Z, UVJ_NZ, UVJ_EQ, UVJ_NE, UVJ_ULE, UVJ_UGT, UVJ_ULT, UVJ_UGE, UVJ_SLE, UVJ_SGT, UVJ_SLT, UVJ_SGE;
+terminal Symbol POCETNA_PRAZNINA, KRAJ_REDA;
+terminal Symbol DEKADSKA_KONSTANTA, HEKSA_KONSTANTA, OKTALNA_KONSTANTA, BINARNA_KONSTANTA;
+
+terminal java.lang.String LABELA;
+terminal java.lang.String KOMENTAR;
+
+non terminal  	linija, linijaSegment, labelaIliNe, komentarIliNe, naredba,
+				pseudonaredba, posebniSlucajevi, konstantaIliLabela, nizKonstantiIliLabela,
+				aritLog3Arg, aritLog2Arg, memorijska, registarska, upravljacka,
+				aritLog3ArgNaredba, registarIlikonstantaIliLabela, memorijskaNaredba,
+				uvjetiUzPrazni;
+non terminal NumBase konstanta;
+non terminal Integer tipBaze, inlineBaza, inlineBazaIliNe;
+
+start with linija;
+
+linija  ::=			linijaSegment KRAJ_REDA linija
+					|
+					linijaSegment
+					{:
+						mapirajLabele();
+					:}
+					;
+
+linijaSegment  ::=	POCETNA_PRAZNINA labelaIliNe naredba komentarIliNe
+					{:
+						addCommand();
+					:}
+					|
+					LABELA:lbl naredba komentarIliNe
+					{:
+						addLabel(lbl);
+						addCommand();
+					:}
+					|
+					POCETNA_PRAZNINA labelaIliNe pseudonaredba komentarIliNe
+					|
+					labelaIliNe pseudonaredba komentarIliNe
+					|
+					POCETNA_PRAZNINA labelaIliNe komentarIliNe
+					|
+					posebniSlucajevi
+					|
+					labelaIliNe komentarIliNe
+					|
+					error
+					;
+
+labelaIliNe  ::=	LABELA:lbl
+					{:
+						addLabel(lbl);
+					:}
+					|
+					;
+					
+komentarIliNe  ::=	KOMENTAR
+					|
+					;
+					
+tipBaze  ::=		PSEUDO_B
+					{:
+						RESULT = B;
+					:}
+					|
+					PSEUDO_D
+					{:
+						RESULT = D;
+					:}
+					|
+					PSEUDO_H
+					{:
+						RESULT = H;
+					:}
+					|
+					PSEUDO_O
+					{:
+						RESULT = O;
+					:}
+					;
+				
+inlineBazaIliNe  ::=	inlineBaza:ib
+						{:
+							RESULT = ib;
+						:}
+						|
+						{:
+							RESULT = null;
+						:}
+						;
+						
+konstanta  ::=		BINARNA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, B);
+					:}
+					|
+					OKTALNA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, O);
+					:}
+					|
+					DEKADSKA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, D);
+					:}
+					|
+					HEKSA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, H);
+					:}
+					;
+					
+konstantaIliLabela  ::=	inlineBazaIliNe konstanta
+						|
+						inlineBazaIliNe LABELA
+						;
+
+posebniSlucajevi  ::=	POCETNA_PRAZNINA LABELA:lbl AP_EQU inlineBazaIliNe:ilb konstanta:k komentarIliNe
+						{:
+							if (containsLabel(lbl)) {
+								Postman.get().sendErrorMsg("Labela " + lbl + " je višestruko definirana!");
+								
+							} else {
+								if (ilb == null) {
+									LabelsMap.get().mapLabel(lbl.toLowerCase(), convertNum(k.num, k.base, currentBase));
+								} else {
+									LabelsMap.get().mapLabel(lbl.toLowerCase(), convertNum(k.num, k.base, ilb));
+								}
+							}
+						:}
+						|
+						LABELA:lbl AP_EQU inlineBazaIliNe:ilb konstanta:k komentarIliNe
+						{:
+							if (containsLabel(lbl)) {
+								Postman.get().sendErrorMsg("Labela " + lbl + " je višestruko definirana!");
+								
+							} else {
+								if (ilb == null) {
+									LabelsMap.get().mapLabel(lbl.toLowerCase(), convertNum(k.num, k.base, currentBase));
+								} else {
+									LabelsMap.get().mapLabel(lbl.toLowerCase(), convertNum(k.num, k.base, ilb));
+								}
+							}
+						:}
+						;
+
+inlineBaza  ::=		PSEUDO_POSTO tipBaze:tb
+					{:
+						RESULT = tb;
+					:}
+					;
+
+nizKonstantiIliLabela  ::=	konstantaIliLabela
+							|
+							konstantaIliLabela ZAREZ nizKonstantiIliLabela
+							;
+
+pseudonaredba  ::=	AP_BASE tipBaze:tb
+					{:
+						currentBase = tb;
+						RESULT = null;
+					:}
+					|
+					AP_ORG konstantaIliLabela
+					|
+					AP_END
+					|
+					AP_DS konstantaIliLabela
+					|
+					AP_DW nizKonstantiIliLabela
+					|
+					DW nizKonstantiIliLabela
+					|
+					DB nizKonstantiIliLabela
+					|
+					DH nizKonstantiIliLabela
+					;
+
+naredba  ::=		aritLog3Arg
+					|
+					aritLog2Arg
+					|
+					memorijska
+					|
+					registarska
+					|
+					upravljacka
+					;
+					
+registarIlikonstantaIliLabela  ::=	konstantaIliLabela
+									|
+									REGISTAR
+									;
+					
+aritLog3Arg  ::=	aritLog3ArgNaredba REGISTAR ZAREZ registarIlikonstantaIliLabela ZAREZ REGISTAR
+					;
+					
+aritLog3ArgNaredba  ::=	ADD | ADC | SUB | SBC | AND | OR | XOR | SHL | SHR | ASHR | ROTL | ROTR
+						;
+
+aritLog2Arg  ::=	CMP REGISTAR ZAREZ registarIlikonstantaIliLabela
+					;
+
+memorijska  ::=		memorijskaNaredba REGISTAR ZAREZ L_ZAGRADA registarIlikonstantaIliLabela D_ZAGRADA
+					|
+					memorijskaNaredba REGISTAR ZAREZ L_ZAGRADA REGISTAR PLUS konstantaIliLabela D_ZAGRADA
+					|
+					PUSH REGISTAR
+					|
+					POP REGISTAR
+					;
+					
+memorijskaNaredba  ::=	LOAD | LOADB | LOADH | STORE | STOREB | STOREH
+						;
+						
+registarska  ::=	MOVE REGISTAR ZAREZ REGISTAR
+					|
+					MOVE konstantaIliLabela ZAREZ REGISTAR
+					|
+					MOVE SR_REGISTAR ZAREZ REGISTAR
+					|
+					MOVE REGISTAR ZAREZ SR_REGISTAR
+					|
+					MOVE konstantaIliLabela ZAREZ SR_REGISTAR
+					;
+
+uvjetiUzPrazni  ::=	UVJ_C | UVJ_NC | UVJ_V | UVJ_NV | UVJ_N | UVJ_NN | UVJ_M | UVJ_P | UVJ_Z | UVJ_NZ
+					|
+					UVJ_EQ | UVJ_NE | UVJ_ULE | UVJ_UGT | UVJ_ULT | UVJ_UGE | UVJ_SLE | UVJ_SGT | UVJ_SLT | UVJ_SGE
+					|
+					;
+
+upravljacka  ::=	JP uvjetiUzPrazni konstantaIliLabela
+					|
+					JP uvjetiUzPrazni L_ZAGRADA REGISTAR D_ZAGRADA
+					|
+					JR uvjetiUzPrazni konstantaIliLabela
+					|
+					CALL uvjetiUzPrazni konstantaIliLabela
+					|
+					CALL uvjetiUzPrazni L_ZAGRADA REGISTAR D_ZAGRADA
+					|
+					RET uvjetiUzPrazni
+					|
+					RETI uvjetiUzPrazni
+					|
+					RETN uvjetiUzPrazni
+					|
+					HALT uvjetiUzPrazni
+					;

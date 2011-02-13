@@ -1,0 +1,736 @@
+package hr.fer.anna.frisc.assembler;
+
+import hr.fer.anna.GUI.Postman;
+import java_cup.runtime.Symbol;
+import java.util.Stack;
+
+/*
+  TODO: Opisi nekih grešaka
+- naredbi ne prethodi praznina
+- Pseudonaredba `ORG ne može postavljati kod na niže adrese od adrese sljedeće memorijske lokacije
+- Neodgovarajući argument
+- Očekivan je opći registar (R0-R7)!
+- Konstanta .... se ne može dobiti predznačnim proširenjem 20-bitnog broja!
+- Labela --- je već definirana
+- Labela --- nije definirana!
+- Nepostojeća baza
+- Kod `EQU dodati obradu inline baze i za asm i za asmLbl!
+- pseudoNaredbi `EQU ne prethodi labela
+*/
+
+parser code {:
+	public boolean error = false;
+	
+	public void report_error(String message, Object info) {
+		error = true;
+		StringBuffer m = new StringBuffer(); //"Sintaksna pogreska");
+		SymLookup symLookup = new SymLookup();
+		
+		if (info instanceof java_cup.runtime.Symbol) {
+			java_cup.runtime.Symbol s = ((java_cup.runtime.Symbol) info);
+			m.append( "Sintaksna greska: " + symLookup.lookup(s.sym));
+			if (s.left >= 0) {                
+				m.append(" u retku "+(s.left+1));   
+				if (s.right >= 0) {                    
+					m.append(" i stupcu "+(s.right+1));
+				}
+			}
+		}
+		
+		System.err.println(m.toString());
+	}
+    
+	public boolean isError() {
+		return error;
+	}
+:}
+
+action code {:
+	private class NumBase {
+		public String num;
+		public int base;
+		
+		public NumBase(String num, int base) {
+			this.num = num;
+			this.base = base;
+		}
+	}
+	
+	private final int B = 2;
+	private final int O = 8;
+	private final int D = 10;
+	private final int H = 16;
+	
+	
+	private int currentBase = H;
+	
+	private int intPow(int base, int exp) {
+		int res = 1;
+		
+		for (int i = 1; i <= exp; i++) {
+			res *= base;
+		}
+		
+		return res;
+	}
+	
+	private int convertFromBase(String num, int base) {
+		int rez = 0;
+		char[] digits = num.toLowerCase().toCharArray();
+		
+		for (int i = 0; i < digits.length; i++) {
+			if (Character.isDigit(digits[i])) {
+				rez += (digits[i] - '0')*intPow(base, i);
+			} else if (Character.isLetter(digits[i])) {
+				rez += (digits[i] - 'a' + 10)*intPow(base, i);
+			} else {
+				// error! Iako se ne bi smjelo dogoditi zbog lexa...
+			}
+		}
+		
+		return rez;
+	}
+	
+	private Integer getLabelValue(String lbl) {
+		return LabelsMap.get().getLabelValue(lbl.toLowerCase());
+	}
+	
+	private Integer convertNum(String num, int orgBase, int destBase) {
+		if (orgBase > destBase) {
+			// error!
+		}
+		
+		return Integer.valueOf(convertFromBase(num, destBase));
+	}
+:}
+
+terminal Symbol ZAREZ, L_ZAGRADA, D_ZAGRADA, PLUS, PSEUDO_POSTO;
+terminal Symbol REGISTAR, SR_REGISTAR;
+terminal Symbol ADD, ADC, SUB, SBC, CMP, AND, OR, XOR, SHL, SHR, ASHR, ROTL, ROTR, MOVE, LOAD, LOADB, LOADH, STORE, STOREB, STOREH, PUSH, POP, JP, JR, CALL, RET, RETI, RETN, HALT; 
+terminal Symbol AP_BASE, AP_ORG, AP_END, AP_EQU, AP_DS, AP_DW, DW, DB, DH, PSEUDO_B, PSEUDO_D, PSEUDO_H, PSEUDO_O;
+terminal Symbol UVJ_C, UVJ_NC, UVJ_V, UVJ_NV, UVJ_N, UVJ_NN, UVJ_M, UVJ_P, UVJ_Z, UVJ_NZ, UVJ_EQ, UVJ_NE, UVJ_ULE, UVJ_UGT, UVJ_ULT, UVJ_UGE, UVJ_SLE, UVJ_SGT, UVJ_SLT, UVJ_SGE;
+terminal Symbol POCETNA_PRAZNINA, KRAJ_REDA;
+terminal Symbol DEKADSKA_KONSTANTA, HEKSA_KONSTANTA, OKTALNA_KONSTANTA, BINARNA_KONSTANTA;
+terminal java.lang.String LABELA;
+terminal java.lang.String KOMENTAR;
+
+non terminal Command	linija, linijaSegment;
+non terminal  			labelaIliNe, komentarIliNe, posebniSlucajevi;
+non terminal Command 	aritLog3Arg, aritLog2Arg, memorijska, registarska, upravljacka, naredba;
+non terminal Byte		memorijskaNaredba, aritLog3ArgNaredba, uvjetiUzPrazni;
+non terminal Integer	konstantaIliLabela, registarIlikonstantaIliLabela;
+non terminal NumBase	konstanta;
+non terminal Integer[]	nizKonstantiIliLabela;
+non terminal Byte[]		pseudonaredba;
+non terminal Integer	tipBaze, inlineBaza, inlineBazaIliNe;
+non terminal Stack<Integer> nizKonstantiIliLabelaKolekcija;
+
+start with linija;
+
+linija  ::=			linijaSegment:ls KRAJ_REDA linija:l
+					{:
+						if (l != null) {
+							ls.setNextCommand(l);
+						}
+						
+						RESULT = ls;
+					:}
+					|
+					linijaSegment:ls
+					{:
+						RESULT = ls;
+					:}
+					;
+
+linijaSegment  ::=	POCETNA_PRAZNINA labelaIliNe naredba:n komentarIliNe
+					{:
+						RESULT = n;
+					:}
+					|
+					LABELA naredba:n komentarIliNe
+					{:
+						RESULT = n;
+					:}
+					|
+					POCETNA_PRAZNINA labelaIliNe pseudonaredba komentarIliNe
+					|
+					labelaIliNe pseudonaredba komentarIliNe
+					|
+					POCETNA_PRAZNINA labelaIliNe komentarIliNe
+					|
+					posebniSlucajevi
+					|
+					labelaIliNe komentarIliNe
+					|
+					error
+					;
+
+labelaIliNe  ::=	LABELA
+					|
+					;
+					
+komentarIliNe  ::=	KOMENTAR
+					|
+					;
+					
+tipBaze  ::=		PSEUDO_B
+					{:
+						RESULT = B;
+					:}
+					|
+					PSEUDO_D
+					{:
+						RESULT = D;
+					:}
+					|
+					PSEUDO_H
+					{:
+						RESULT = H;
+					:}
+					|
+					PSEUDO_O
+					{:
+						RESULT = O;
+					:}
+					;
+				
+inlineBazaIliNe  ::=	inlineBaza:ib
+						{:
+							RESULT = ib;
+						:}
+						|
+						{:
+							RESULT = null;
+						:}
+						;
+						
+konstanta  ::=		BINARNA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, B);
+					:}
+					|
+					OKTALNA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, O);
+					:}
+					|
+					DEKADSKA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, D);
+					:}
+					|
+					HEKSA_KONSTANTA:k
+					{:
+						RESULT = new NumBase((String) k.value, H);
+					:}
+					;
+					
+konstantaIliLabela  ::=	inlineBazaIliNe:ilb konstanta:k
+						{:
+							if (ilb == null) {
+								RESULT = convertNum(k.num, k.base, currentBase);
+							} else {
+								RESULT = convertNum(k.num, k.base, ilb);
+							}
+						:}
+						|
+						LABELA:lbl
+						{:
+							RESULT = getLabelValue(lbl);
+							// Ako je null -> error!
+						:}
+						;
+
+posebniSlucajevi  ::=	POCETNA_PRAZNINA LABELA AP_EQU inlineBazaIliNe konstanta:k komentarIliNe
+						|
+						LABELA AP_EQU inlineBazaIliNe konstanta:k komentarIliNe
+						;
+
+inlineBaza  ::=		PSEUDO_POSTO tipBaze:tb
+					{:
+						RESULT = tb;
+					:}
+					;
+
+nizKonstantiIliLabela  ::=	nizKonstantiIliLabelaKolekcija:nk
+							{:
+								Integer[] niz = new Integer[nk.size()];
+								for (int i = 0; i < niz.length; i++) {
+									niz[i] = nk.pop();
+								}
+								
+								RESULT = niz;
+							:}
+							;
+							
+nizKonstantiIliLabelaKolekcija  ::=	konstantaIliLabela:k
+								{:
+									Stack<Integer> niz = new Stack<Integer>();
+									niz.push(k);
+									RESULT = niz;
+								:}
+								|
+								konstantaIliLabela:k ZAREZ nizKonstantiIliLabelaKolekcija:nk
+								{:
+									nk.push(k);
+									RESULT = nk;
+								:}
+								;
+
+/* sredi */
+pseudonaredba  ::=	AP_BASE tipBaze:tb
+					{:
+						currentBase = tb;
+						RESULT = null;
+					:}
+					|
+					AP_ORG konstantaIliLabela
+					|
+					AP_END
+					|
+					AP_DS konstantaIliLabela
+					|
+					AP_DW nizKonstantiIliLabela
+					|
+					DW nizKonstantiIliLabela
+					|
+					DB nizKonstantiIliLabela
+					|
+					DH nizKonstantiIliLabela
+					;
+
+naredba  ::=		aritLog3Arg:n
+					{:
+						RESULT = n;
+					:}
+					|
+					aritLog2Arg:n
+					{:
+						RESULT = n;
+					:}
+					|
+					memorijska:n
+					{:
+						RESULT = n;
+					:}
+					|
+					registarska:n
+					{:
+						RESULT = n;
+					:}
+					|
+					upravljacka:n
+					{:
+						RESULT = n;
+					:}
+					;
+					
+registarIlikonstantaIliLabela  ::=	konstantaIliLabela:val
+									{:
+										RESULT = val;
+									:}
+									|
+									REGISTAR:r
+									{:
+										RESULT = (Integer) r.value;
+									:}
+									;
+/* sredi */					
+aritLog3Arg  ::=	aritLog3ArgNaredba REGISTAR ZAREZ registarIlikonstantaIliLabela ZAREZ REGISTAR
+					;
+					
+aritLog3ArgNaredba  ::=	ADD:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						ADC:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						SUB:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						SBC:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						AND:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						OR:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						XOR:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						SHL:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						SHR:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						ASHR:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						ROTL:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						ROTR:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						;
+
+/* sredi */
+aritLog2Arg  ::=	CMP REGISTAR ZAREZ registarIlikonstantaIliLabela
+					;
+
+/* sredi */
+memorijska  ::=		memorijskaNaredba REGISTAR ZAREZ L_ZAGRADA registarIlikonstantaIliLabela D_ZAGRADA
+					|
+					memorijskaNaredba REGISTAR ZAREZ L_ZAGRADA REGISTAR PLUS konstantaIliLabela D_ZAGRADA
+					|
+					PUSH REGISTAR
+					|
+					POP REGISTAR
+					;
+					
+memorijskaNaredba  ::=	LOAD:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						LOADB:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						LOADH:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						STORE:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						STOREB:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						|
+						STOREH:n
+						{:
+							RESULT = (Byte) n.value;
+						:}
+						;
+
+/* sredi */		
+/*MOVE src1, SR src1 ÷ SR (najniži bajt od src1 se puni u SR) 00000 0 --- 001 src1 ----------------- ovisi o najnižem bajtu od src1
+MOVE broj20, SR ext broj20 ÷ SR (najniži bajt od broj20 se puni u SR) 00000 1 --- 001 broj20*/
+				
+registarska  ::=	MOVE:m REGISTAR:r1 ZAREZ REGISTAR:r2
+					{:
+						byte cmd = ((Byte) m.value).byteValue();
+						//int konst = k & 0x0FFFFF;
+						byte des = ((Integer) r2.value).byteValue();
+						byte src = ((Integer) r2.value).byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) ((des & 1) << 7 | (src & 7) << 1);
+						bc[3] = (byte) (cmd << 3 | des >> 1);
+						
+						RESULT = new Command(bc, m.right, m.left);
+					:}
+					|
+					MOVE:m konstantaIliLabela:k ZAREZ REGISTAR:r
+					{:
+						byte cmd = ((Byte) m.value).byteValue();
+						int konst = k & 0x0FFFFF;
+						byte des = ((Integer) r.value).byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) (konst & 0x000FF);
+						bc[1] = (byte) ((konst & 0x0FFFF) >> 8);
+						bc[2] = (byte) ((des & 1) << 7 | (konst & 0x0FFFFF) >> 16);
+						bc[3] = (byte) (cmd << 3 | 0x04 | des >> 1);
+						
+						RESULT = new Command(bc, m.right, m.left);
+					:}
+					|
+					MOVE:m SR_REGISTAR:sr ZAREZ REGISTAR:r
+					{:
+						byte cmd = ((Byte) m.value).byteValue();
+						byte reg = ((Integer) r.value).byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) ((reg & 1) << 7 | 0x20);
+						bc[3] = (byte) (cmd << 3 | reg >> 1);
+						
+						RESULT = new Command(bc, m.right, m.left);
+					:}
+					|
+					MOVE:m REGISTAR:r ZAREZ SR_REGISTAR:sr
+					{:
+						byte cmd = ((Byte) m.value).byteValue();
+						byte reg = ((Integer) r.value).byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) ((reg & 1) << 7 | 0x20);
+						bc[3] = (byte) (cmd << 3 | reg >> 1);
+						
+						RESULT = new Command(bc, m.right, m.left);
+					:}
+					|
+					MOVE:m konstantaIliLabela:k ZAREZ SR_REGISTAR:sr
+					;
+
+uvjetiUzPrazni  ::=	UVJ_C:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_NC:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_V:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_NV:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_N:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_NN:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_M:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_P:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_Z:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_NZ:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_EQ:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_NE:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_ULE:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_UGT:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_ULT:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_UGE:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_SLE:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_SGT:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_SLT:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					UVJ_SGE:u
+					{:
+						RESULT = (Byte) u.value;
+					:}
+					|
+					{:
+						RESULT = Byte.valueOf((byte) 0x00);
+					:}
+					;
+
+upravljacka  ::=	JP:n uvjetiUzPrazni:u konstantaIliLabela:k
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						int konst = k & 0x0FFFFF;
+						byte[] bc = new byte[4];
+						bc[0] = (byte) (konst & 0x000FF);
+						bc[1] = (byte) ((konst & 0x0FFFF) >> 8);
+						bc[2] = (byte) (uv << 6 | konst >> 16);
+						bc[3] = (byte) (cmd << 3 | uv >> 2 | 0x04);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					JP:n uvjetiUzPrazni:u L_ZAGRADA REGISTAR:r D_ZAGRADA
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						byte reg = ((Integer) r.value).byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) (uv << 6 | reg << 1);
+						bc[3] = (byte) (cmd << 3 | uv >> 2);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					JR:n uvjetiUzPrazni:u konstantaIliLabela:k
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						int konst = k & 0x0FFFFF;
+						byte[] bc = new byte[4];
+						bc[0] = (byte) (konst & 0x000FF);
+						bc[1] = (byte) ((konst & 0x0FFFF) >> 8);
+						bc[2] = (byte) (uv << 6 | konst >> 16);
+						bc[3] = (byte) (cmd << 3 | uv >> 2 | 0x04);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					CALL:n uvjetiUzPrazni:u konstantaIliLabela:k
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						int konst = k & 0x0FFFFF;
+						byte[] bc = new byte[4];
+						bc[0] = (byte) (konst & 0x000FF);
+						bc[1] = (byte) ((konst & 0x0FFFF) >> 8);
+						bc[2] = (byte) (uv << 6 | konst >> 16);
+						bc[3] = (byte) (cmd << 3 | uv >> 2 | 0x04);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					CALL:n uvjetiUzPrazni:u L_ZAGRADA REGISTAR:r D_ZAGRADA
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						byte reg = ((Integer) r.value).byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) (uv << 6 | reg << 1);
+						bc[3] = (byte) (cmd << 3 | uv >> 2);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					RET:n uvjetiUzPrazni:u
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) (uv << 6);
+						bc[3] = (byte) (cmd << 3 | uv >> 2);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					RETI:n uvjetiUzPrazni:u
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x01;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) (uv << 6);
+						bc[3] = (byte) (cmd << 3 | uv >> 2);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					RETN:n uvjetiUzPrazni:u
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x03;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) (uv << 6);
+						bc[3] = (byte) (cmd << 3 | uv >> 2);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					|
+					HALT:n uvjetiUzPrazni:u
+					{:
+						byte cmd = ((Byte) n.value).byteValue();
+						byte uv = u.byteValue();
+						byte[] bc = new byte[4];
+						bc[0] = (byte) 0x00;
+						bc[1] = (byte) 0x00;
+						bc[2] = (byte) (uv << 6);
+						bc[3] = (byte) (cmd << 3 | uv >> 2);
+						
+						RESULT = new Command(bc, n.right, n.left);
+					:}
+					;

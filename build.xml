@@ -1,0 +1,45 @@
+<project name="ANNA" default="compile" basedir=".">
+	
+    <property name="cupJar" location="lib/java-cup-11a.jar"/>
+	<property name="jflexJar" location="lib/JFlex.jar"/>
+    <description>
+        	Build File for ANNA Project
+    </description>
+
+	<target name="generate_lexer">
+		<!-- Za FRISC -->
+		<java jar="${jflexJar}" fork="true" failonerror="true">
+			<arg line="-d ./src/hr/fer/anna/frisc/assembler -nobak frisc-data/assembler.lex" />
+		</java>
+	</target>
+	
+	<target name="generate_parser" depends="generate_parser_labels">
+		<!-- Za FRISC -->
+		<java jar="${cupJar}" fork="true" failonerror="true">
+			<arg line="-destdir ./src/hr/fer/anna/frisc/assembler -parser Assembler frisc-data/assembler.cup" />
+		</java>		
+	</target>
+	
+	<target name="generate_parser_labels">
+			<!-- Za FRISC -->
+			<java jar="${cupJar}" fork="true" failonerror="true">
+				<arg line="-destdir ./src/hr/fer/anna/frisc/assembler -parser AssemblerLabels frisc-data/assemblerLabels.cup" />
+			</java>		
+		</target>
+	
+	<!--
+	<target name="generate_symlookup" depends="generate_parser" >
+		<exec executable="./extractSym.pl" output="src/hr/fer/zemris/piton/SymLookup.java" input="src/hr/fer/zemris/piton/sym.java">
+		</exec>
+	</target>
+	-->
+	
+    <target name="compile" depends="generate_lexer, generate_parser">
+        <mkdir dir="build/classes" />
+		<javac srcdir="src" destdir="build/classes" classpath="${cupJar}"/>
+    </target>
+     
+	<target name="clean">
+		<delete dir="build" />
+    </target>
+</project>
