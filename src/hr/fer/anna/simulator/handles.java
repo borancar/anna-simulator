@@ -1,5 +1,7 @@
 package hr.fer.anna.simulator;
 
+import hr.fer.anna.events.SimulationEvent;
+
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -19,5 +21,5 @@ public @interface handles {
 	 * Eventovi na koje je metoda spremna reagirati.
 	 * @return eventovi
 	 */
-	public Class[] events();
+	public Class<? extends SimulationEvent>[] events();
 }

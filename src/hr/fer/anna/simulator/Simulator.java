@@ -127,7 +127,7 @@ public class Simulator implements Runnable {
 			if(method.isAnnotationPresent(handles.class)) {
 				handles what = method.getAnnotation(handles.class);
 				
-				for (Class<SimulationEvent> event : what.events()) {
+				for (Class<? extends SimulationEvent> event : what.events()) {
 					System.out.println(event.toString());
 				}
 			}
