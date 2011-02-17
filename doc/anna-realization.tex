@@ -70,7 +70,63 @@
   \end{figure}
 
   \section{Mikroinstrukcije}
-  Mikroinstrukcije predstavljaju različite podatkovne puteve.
+  Zadatak dekodera instrukcija je generacija kontrolnih signala unutar
+  procesora. Jedan ovakav općeniti dekoder se može razbiti na 2 manja
+  dekodera:
+  \begin{enumerate}
+    \item Dekoder instrukcije u jednu ili više instrukcija (nazovimo
+      ih mikroinstrukcije)
+    \item Dekoder mikroinstrukcija u kontrolne signale unutar procesora
+  \end{enumerate}
+
+  Povijesni razlog uvođenja mikroinstrukcija je bio olakšavanje
+  dekodiranja kompleksnih instrukcija. Mikroinstrukcije (mikrokod
+  općenito) su olakšali rješavanje sljedećih problema kod CISC
+  procesora:
+  \begin{itemize}
+    \item Kako je set instrukcija postajao sve kompleksniji, sve je
+      teže bilo pronaći efikasno kodiranje kojim bi se olakšala
+      aktivacija podatkovnih putova unutar procesora
+    \item Paralelizacija koju je moguće napraviti često nije bila
+      očita tokom dizajna procesora
+    \item Kompleksna povezanost između seta instrukcija i podatkovnih
+      putova
+    \item Reprogramabilnost u slučaju pronađenog kvara (Intel Core 2)
+  \end{itemize}
+
+  Za RISC i VLIW procesore postoje argumenti za i protiv uporabe
+  mikroinstrukcija, međutim, mi ih koristimo radi jednostavnosti i
+  dosljednosti arhitekture.  Najčešće će za RISC procesore vrijediti
+  preslikavanje 1 na 1. VLIW procesori kodiraju više jednostavnih
+  operacija unutar jedne instrukcije i stoga ovdje opet očekujemo
+  preslikavanje 1 na 1 za svaku operaciju.
+
+  Mikroasembler (IInstructionDecoder u našem slučaju) rastavlja ulaznu
+  instrukciju na mikroinstrukcije koje mikromašina unutar procesora
+  izvršava. U HW-u je to realizirano na način da postoji
+  mikrosekvencer koji iterira po mikroinstrukcjima i izvršava
+  ih. Mikroasembler odgovara prvom dekoderu, dok mikrosekvencer predaje
+  rezultat prvog dekodera 2. dekoderu. Mikrosekvencer i 2. dekoder se
+  mogu grupirati u mikromašinu.
+
+  Ovisno o tome da li je potrebno naknadno dekodiranje prije nego
+  se kontrolni signali generiraju, postoje horizontalne i vertikalne
+  mikroinstrukcije. Vraćajući se na početno razbijanje na 2 dekodera,
+  horizontalne mikroinstrukcije imaju trivijalni oblik 2. dekodera.  U
+  programskoj realizaciji nije moguće napraviti ovakvu podjelu
+  (programska realizacija već sama po sebi omogućava i koristi
+  prekompleksno dekodiranje) pa je stoga i nećemo.
+
+  Očekivane prednosti jednake su prednostima koje VM-ovi
+  trenutno nude jer su mikroinstrukcije tandem IL, a mikromašina
+  tandem VM. \todo{Popisati ih, LLVM kao najbliža referenca}
+  Kao što VM i IL bytecode nude portabilnost, tako i
+  mikroinstrukcije apstrahirane ovdje trebaju nuditi presliku bilo
+  kojeg instrukcijskog seta u jedan predefinirani set naredbi koje će
+  naše ponuđene mikromašine znati izvršavati. Pri tome se jedna
+  instrukcija iz seta preslikava u jednu ili više
+  mikroinstrukcija.
+
   Programski su realizirane preko Command patterna.  Trenutno su
   realizirane sljedeće:
   \begin{description}
@@ -89,40 +145,33 @@
       iz određenog registra
   \end{description}
 
-  \todo{Dodati dijagram koji pobliže ilustrira mikroinstrukcije}
-
-  \tikzstyle{executionunit}=[draw, rectangle, minimum width=2cm,
-    minimum height=2cm]
-
-  \tikzstyle{registerfile}=[draw, rectangle, minimum width=1cm,
-    minimum height=2cm]
-
-  \begin{tikzpicture}
-    \node[executionunit] (stage1) at (0,0) {IExecutionUnit};
-    \node[registerfile]  (regs1)  at (2,0) {};
-    \node[executionunit] (stage2) at (5,0) {IExecutionUnit};
-    \node[registerfile]  (regs2)  at (7,0) {};
-
-    \pgfsetcolor{black!20};
-    \pgfusepath{fill,stroke};
-
-    \foreach \t in {0,0.25,0.5,0.75,1}{
-      \pgfpathmoveto{\pgfpointlineattime{\t}{stage1.north east}{stage1.south east}};
-      \pgfpathlineto{\pgfpointlineattime{\t}{regs1.north west}{regs1.south west}};
-    }
-
-    \draw[->] (stage1.east) -- (regs1.west);
-    \draw[->] (regs1.east) -- (stage2.west);
-    \draw[->] (stage2.east) -- (regs2.west);
-  \end{tikzpicture}
-
   \subsection{Poboljšanja}
 
+  Treba izdvojiti općenitu implementaciju mikromašine (nazovimo je
+  IMicroMachine ili IExecutionUnit) tako da je dovoljno samo je
+  uključiti u procesor za omogućiti rad. Tada je također moguće i
+  specijalizirati mikromašinu da izvršava samo određene
+  mikroinstrukcije (podskup), a ostale prosljeđuje. Nastavak na ovo su
+  razne kombinacije grafove koje će predstavljati
+  serijske/paralelne/kombinirane podatkovne putove.
+
+  Za dodati pipeline treba dodati i posebnu instrukciju za flush
+  pipeline kada se dogodi hazard koji nije moguće obraditi. Nakon
+  toga, dovoljno je samo pospojiti specificirane mikromašine u seriju
+  stupnjeva koliko ih pipeline ima.
+
+  Može se dodati poseban IDispatcher čija je služba raspodjeljivanje posla
+  kada postoji više paralelnih mikromašina koje mogu izvršavati isti podskup
+  mikroinstrukcija.
+
   Trenutne mikroinstrukcije bi se možda trebale spustiti razinu niže
-  tako da uistinu predstavljaju podatkove puteve (prema RTL - register
-  transfer level). Eventualno bi se trenutne mikroinstrukcije mogle
-  ostaviti kakve jesu, a dodati novi paket koji bi omogućio bolju
-  reprentaciju podatkovnog puta (stavljanje vrijednosti u registar,
-  aritmetičke operacije nad registrom itd...)
+  tako da uistinu predstavljaju podatkovne puteve (prema RTL -
+  register transfer level). Primjerice, JumpMicroinstruction bi se
+  mogla razbiti na MoveMicroinstruction odrediša u PC i
+  LoadMicroinstruction sa adrese PC u IR. Eventualno bi se trenutne
+  mikroinstrukcije mogle ostaviti kakve jesu (jer služe svrsi
+  savršeno), a dodati novi paket koji bi omogućio bolju reprentaciju
+  podatkovnog puta (stavljanje vrijednosti u registar, aritmetičke
+  operacije nad registrom itd...).
 
 \end{document}
