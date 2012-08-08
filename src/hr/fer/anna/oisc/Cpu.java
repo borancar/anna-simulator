@@ -4,26 +4,25 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Queue;
-import java.util.Set;
-
 import hr.fer.anna.events.NextProcessorStateEvent;
 import hr.fer.anna.events.ProcessorEvent;
 import hr.fer.anna.events.SimulationEvent;
 import hr.fer.anna.exceptions.IllegalActionException;
 import hr.fer.anna.exceptions.MicrocodeException;
 import hr.fer.anna.exceptions.SimulationException;
+import hr.fer.anna.exceptions.UnknownAddressException;
 import hr.fer.anna.interfaces.IBus;
+import hr.fer.anna.interfaces.IBusMaster;
 import hr.fer.anna.interfaces.IEventListener;
 import hr.fer.anna.interfaces.IEventSetter;
 import hr.fer.anna.interfaces.IInstructionDecoder;
 import hr.fer.anna.interfaces.IMicroinstruction;
+import hr.fer.anna.interfaces.IProcessor;
 
 import hr.fer.anna.simulator.Simulator;
 import hr.fer.anna.simulator.handles;
 import hr.fer.anna.uniform.Address;
-import hr.fer.anna.uniform.CentralProcessingUnit;
 import hr.fer.anna.uniform.Constant;
-import hr.fer.anna.uniform.InterruptPort;
 import hr.fer.anna.uniform.Register;
 import hr.fer.anna.model.UnitReport;
 import hr.fer.anna.model.Word;
@@ -31,7 +30,7 @@ import hr.fer.anna.model.Word;
 /**
  * Realizacija OISC CPU-a.
  */
-public class Cpu extends CentralProcessingUnit implements IEventSetter, IEventListener {
+public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener {
 
 	/** Flag koji određuje je li procesor aktivan. */
 	private boolean isRunning;
@@ -54,9 +53,6 @@ public class Cpu extends CentralProcessingUnit implements IEventSetter, IEventLi
 	/** Akumulator. */
 	private Register accuReg;
 	
-	/** Interrupt portovi <Naziv, otvoren/zatvoren>. */
-	private Map<String, InterruptPort> interruptPorts;
-	
 	/** Red mikroinstrukcija koje treba izvršavati */
 	private Queue<IMicroinstruction> microinstructionCache;
 	
@@ -66,8 +62,71 @@ public class Cpu extends CentralProcessingUnit implements IEventSetter, IEventLi
 	/** Simulator na kojeg smo spojeni */
 	private Simulator simulator;
 	
+	/** Sabirnica spojena na procesor */
+	private IBus bus;
+	
+	private static interface IState {
+		
+		public ProcessorState run() throws MicrocodeException, IllegalActionException, UnknownAddressException;
+	}
+	
+	private IState loadState = new IState() {
+		
+		@Override
+		public ProcessorState run() throws MicrocodeException, IllegalActionException, UnknownAddressException {
+			bus.requestRead(Cpu.this, pc.getAddress());
+			
+			pc.set(Word.add(pc, Constant.ONE));
+			
+			return ProcessorState.DECODE_INSTRUCTION;
+		}
+	};
+	
+	private IState decodeState = new IState() {
+		
+		@Override
+		public ProcessorState run() throws MicrocodeException {
+			microinstructionCache.addAll(instructionDecoder.decode(codeReq));
+			
+			if (microinstructionCache.isEmpty()) {
+				halt();
+			}
+
+			simulator.setNewEvent(new NextProcessorStateEvent(Cpu.this, Cpu.this));
+
+			return ProcessorState.EXECUTE_INSTRUCTION;
+		}
+	};
+	
+	private IState executeState = new IState() {
+		
+		@Override
+		public ProcessorState run() throws MicrocodeException {
+			while (!microinstructionCache.isEmpty()) {
+				// Ako se dogodio hazard, izlazimo i čekamo da se hazard riješi
+				// prije nastavka izvršavanja
+				IMicroinstruction microinstruction = microinstructionCache.remove();
+				
+				if (microinstruction.execute()) {
+					break;
+				}
+			}
+			
+			if (!microinstructionCache.isEmpty()) {
+				// Ako ima još mikroinstrukcija, to moramo u sljedećem ciklusu obavit
+				// čekamo otklanjanje hazarda koje će nam biti dojavljeno
+				
+				return ProcessorState.EXECUTE_INSTRUCTION;
+			} else {
+				simulator.setNewEvent(new NextProcessorStateEvent(Cpu.this, Cpu.this));
+
+				return ProcessorState.LOAD_INSTRUCTION;
+			}
+		}
+	};
+	
 	/** Stanja procesora (procesor je stroj s konačnim brojem stanja) */
-	private enum ProcessorState {
+	private enum ProcessorState {		
 		/** Učitavanje instrukcije iz memorije */
 		LOAD_INSTRUCTION,
 		
@@ -75,8 +134,10 @@ public class Cpu extends CentralProcessingUnit implements IEventSetter, IEventLi
 		DECODE_INSTRUCTION,
 		
 		/** Izvršavanje instrukcije nakon što je ona dekodirana */
-		EXECUTE_INSTRUCTION
+		EXECUTE_INSTRUCTION;
 	}
+	
+	private Map<ProcessorState, IState> states = new HashMap<Cpu.ProcessorState, Cpu.IState>();
 	
 	/** Trenutno stanje u kojem se nalazi procesor */
 	private ProcessorState currentProcessorState;
@@ -108,69 +169,24 @@ public class Cpu extends CentralProcessingUnit implements IEventSetter, IEventLi
 		this.addressReq = new Register();
 		this.accuReg = new Register();
 		
-		// Postavljanje interrupt portova
-		this.interruptPorts = new HashMap<String, InterruptPort>();
-		this.interruptPorts.put("irq0", new InterruptPort("irq0", 8));
-		this.interruptPorts.put("irq1", new InterruptPort("irq1", 8));
-		this.interruptPorts.put("nmi0", new InterruptPort("nmi0", 12));
-		
 		this.microinstructionCache = new LinkedList<IMicroinstruction>();
 		
 		this.instructionDecoder = new InstructionDecoder(this, this.bus, this.dataReg, this.accuReg, this.pc, this.statusReg);
-	}
-
-	@Override
-	protected void closeInterruptPort(String port) throws IllegalActionException {
-		if (this.interruptPorts.containsKey(port)) {
-			this.interruptPorts.get(port).setIsOpen(false);
-		} else {
-			throw new IllegalActionException("Ne postoji port s nazivom: " + port);
-		}
-	}
 	
-	@Override
-	protected void openInterruptPort(String port) throws IllegalActionException {
-		if (this.interruptPorts.containsKey(port)) {
-			this.interruptPorts.get(port).setIsOpen(true);
-		} else {
-			throw new IllegalActionException("Ne postoji port s nazivom: " + port);
-		}
-
-	}
-
-	@Override
-	public Set<String> getPorts() {
-		return this.interruptPorts.keySet();
+		this.states.put(ProcessorState.LOAD_INSTRUCTION, loadState);
+		this.states.put(ProcessorState.DECODE_INSTRUCTION, decodeState);
+		this.states.put(ProcessorState.EXECUTE_INSTRUCTION, executeState);
 	}
 
 	@Override
 	public void halt() {
 		this.isRunning = false;
 	}
-
+	
 	@Override
-	public boolean isPortOpened(String port) throws IllegalActionException {
-		if (this.interruptPorts.containsKey(port)) {
-			return this.interruptPorts.get(port).isOpen();
-		} else {
-			throw new IllegalActionException("Ne postoji port s nazivom: " + port);
-		}
-	}
-
-	@Override
-	public boolean receiveInterrupt(String port) throws IllegalActionException {
-		if (this.interruptPorts.containsKey(port)) {
-			if (!this.statusReg.isInterruptEnabled(port)
-					|| !this.interruptPorts.get(port).isOpen()) {
-				return false;
-			}
-			
-			this.statusReg.setInterrupt(port, true);
-			
-			return true;
-		} else {
-			throw new IllegalActionException("Ne postoji port s nazivom: " + port);
-		}
+	public void reset() {
+		this.isRunning = true;
+		this.nextProcessorState = ProcessorState.LOAD_INSTRUCTION;
 	}
 
 	public void init(Simulator sim) {
@@ -204,59 +220,10 @@ public class Cpu extends CentralProcessingUnit implements IEventSetter, IEventLi
 		
 		currentProcessorState = nextProcessorState;
 		
-		switch (currentProcessorState) {
-			case LOAD_INSTRUCTION:
-				
-				this.bus.requestRead(this, pc.getAddress());
-				
-				pc.set(Word.add(pc, Constant.ONE));
-								
-				this.nextProcessorState = ProcessorState.DECODE_INSTRUCTION;
-				
-				break;
-			
-			case DECODE_INSTRUCTION:
-				this.microinstructionCache.addAll(instructionDecoder.decode(codeReq));
-				
-				if (this.microinstructionCache.isEmpty()) {
-					this.halt();
-				}
-								
-				this.nextProcessorState = ProcessorState.EXECUTE_INSTRUCTION;
-
-				simulator.setNewEvent(new NextProcessorStateEvent(this, this));
-				
-				break;
-				
-			case EXECUTE_INSTRUCTION:
-				
-				while (!this.microinstructionCache.isEmpty()) {
-					// Ako se dogodio hazard, izlazimo i čekamo da se hazard riješi
-					// prije nastavka izvršavanja
-					try {
-						IMicroinstruction microinstruction = this.microinstructionCache.remove();
-						
-						if (microinstruction.execute()) {
-							break;
-						}
-					} catch (MicrocodeException e) {
-						throw new SimulationException("Mikroinstrukcija se nije mogla izvršiti!", e);
-					}
-				}
-				
-				if (!this.microinstructionCache.isEmpty()) {
-					// Ako ima još mikroinstrukcija, to moramo u sljedećem ciklusu obavit
-					// čekamo otklanjanje hazarda koje će nam biti dojavljeno
-					this.nextProcessorState = ProcessorState.EXECUTE_INSTRUCTION;
-				} else {
-					this.nextProcessorState = ProcessorState.LOAD_INSTRUCTION;
-					simulator.setNewEvent(new NextProcessorStateEvent(this, this));
-				}
-
-				break;
-								
-			default:
-				break;
+		try {
+			nextProcessorState = states.get(currentProcessorState).run();
+		} catch (MicrocodeException e) {
+			throw new SimulationException("CPU Exception", e);
 		}
 	}
 

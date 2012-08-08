@@ -1,7 +1,7 @@
 package hr.fer.anna.events;
 
 import hr.fer.anna.interfaces.IEventSetter;
-import hr.fer.anna.uniform.CentralProcessingUnit;
+import hr.fer.anna.interfaces.IProcessor;
 
 /**
  * Općeniti eventovi koji su namijenjeni procesoru.
@@ -11,15 +11,15 @@ import hr.fer.anna.uniform.CentralProcessingUnit;
 public class ProcessorEvent extends SimulationEvent {
 
 	/** Procesor koji treba primiti i obraditi ovaj event */
-	private CentralProcessingUnit cpu;
+	private IProcessor processor;
 	
 	/**
 	 * Defaultni konstruktor, isključiva svrha mu je za uspoređivanje eventova.
-	 * @param cpu procesor kojemu je namijenjen event
+	 * @param processor procesor kojemu je namijenjen event
 	 */
-	public ProcessorEvent(CentralProcessingUnit cpu) {
+	public ProcessorEvent(IProcessor processor) {
 		super();
-		this.cpu = cpu;
+		this.processor = processor;
 	}
 	
 	/**
@@ -28,9 +28,9 @@ public class ProcessorEvent extends SimulationEvent {
 	 * @param eventSource Objekt koji je postavio event.
 	 * @param cpu Procesor koji treba primiti ovaj event.
 	 */
-	public ProcessorEvent(IEventSetter eventSource, CentralProcessingUnit cpu) {
+	public ProcessorEvent(IEventSetter eventSource, IProcessor processor) {
 		super(eventSource);
-		this.cpu = cpu;
+		this.processor = processor;
 	}
 	
 	/**
@@ -40,9 +40,9 @@ public class ProcessorEvent extends SimulationEvent {
 	 * @param myTimeIndex Vrijeme kada se event treba obraditi.
 	 * @param cpu procesor koji treba primiti i obraditi ovaj event
 	 */
-	public ProcessorEvent(IEventSetter eventSource, long myTimeIndex, CentralProcessingUnit cpu) {
+	public ProcessorEvent(IEventSetter eventSource, long myTimeIndex, IProcessor processor) {
 		super(eventSource, myTimeIndex);
-		this.cpu = cpu;
+		this.processor = processor;
 	}
 	
 	/**
@@ -50,8 +50,8 @@ public class ProcessorEvent extends SimulationEvent {
 	 * 
 	 * @return procesor
 	 */
-	public CentralProcessingUnit getCpu() {
-		return this.cpu;
+	public IProcessor getCpu() {
+		return this.processor;
 	}
 	
 	/**
@@ -64,10 +64,10 @@ public class ProcessorEvent extends SimulationEvent {
 		
 		ProcessorEvent other = (ProcessorEvent) obj;
 		
-		return this.cpu == other.cpu;
+		return this.processor == other.processor;
 	}
 	
 	public int hashCode() {
-		return this.cpu.hashCode();
+		return this.processor.hashCode();
 	}
 }
