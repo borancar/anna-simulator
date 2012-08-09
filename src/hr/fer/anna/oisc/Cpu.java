@@ -65,12 +65,12 @@ public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener
 	/** Sabirnica spojena na procesor */
 	private IBus bus;
 	
-	private static interface IState {
+	private static interface IAction {
 		
 		public ProcessorState run() throws MicrocodeException, IllegalActionException, UnknownAddressException;
 	}
 	
-	private IState loadState = new IState() {
+	private IAction loadAction = new IAction() {
 		
 		@Override
 		public ProcessorState run() throws MicrocodeException, IllegalActionException, UnknownAddressException {
@@ -82,7 +82,7 @@ public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener
 		}
 	};
 	
-	private IState decodeState = new IState() {
+	private IAction decodeAction = new IAction() {
 		
 		@Override
 		public ProcessorState run() throws MicrocodeException {
@@ -98,7 +98,7 @@ public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener
 		}
 	};
 	
-	private IState executeState = new IState() {
+	private IAction executeAction = new IAction() {
 		
 		@Override
 		public ProcessorState run() throws MicrocodeException {
@@ -134,10 +134,13 @@ public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener
 		DECODE_INSTRUCTION,
 		
 		/** Izvršavanje instrukcije nakon što je ona dekodirana */
-		EXECUTE_INSTRUCTION;
+		EXECUTE_INSTRUCTION,
+		
+		/** Rad procesora je zaustavljen */
+		HALTED;
 	}
 	
-	private Map<ProcessorState, IState> states = new HashMap<Cpu.ProcessorState, Cpu.IState>();
+	private Map<ProcessorState, IAction> actions = new HashMap<Cpu.ProcessorState, Cpu.IAction>();
 	
 	/** Trenutno stanje u kojem se nalazi procesor */
 	private ProcessorState currentProcessorState;
@@ -173,14 +176,15 @@ public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener
 		
 		this.instructionDecoder = new InstructionDecoder(this, this.bus, this.dataReg, this.accuReg, this.pc, this.statusReg);
 	
-		this.states.put(ProcessorState.LOAD_INSTRUCTION, loadState);
-		this.states.put(ProcessorState.DECODE_INSTRUCTION, decodeState);
-		this.states.put(ProcessorState.EXECUTE_INSTRUCTION, executeState);
+		this.actions.put(ProcessorState.LOAD_INSTRUCTION, loadAction);
+		this.actions.put(ProcessorState.DECODE_INSTRUCTION, decodeAction);
+		this.actions.put(ProcessorState.EXECUTE_INSTRUCTION, executeAction);
 	}
 
 	@Override
 	public void halt() {
 		this.isRunning = false;
+		this.nextProcessorState = ProcessorState.HALTED;
 	}
 	
 	@Override
@@ -221,7 +225,7 @@ public class Cpu implements IProcessor, IBusMaster, IEventSetter, IEventListener
 		currentProcessorState = nextProcessorState;
 		
 		try {
-			nextProcessorState = states.get(currentProcessorState).run();
+			nextProcessorState = actions.get(currentProcessorState).run();
 		} catch (MicrocodeException e) {
 			throw new SimulationException("CPU Exception", e);
 		}
